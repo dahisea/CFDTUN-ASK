@@ -1,0 +1,90 @@
+name: Test Configuration
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: 
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Magisk
+        run: |
+          for char in {0..9} {A..Z} {a..z}; do
+          echo "::add-mask::$char"
+          done
+    
+      - name: Get modified
+        run: |
+          sudo modprobe tcp_bbr
+          sudo sysctl -w net.core.rmem_max=8388608
+          sudo sysctl -w net.core.wmem_max=8388608
+          sudo sysctl -w net.ipv4.ping_group_range="0 1000"
+          sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 4194304"
+          sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 4194304"
+          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
+          sudo sysctl -w net.core.default_qdisc=cake
+          sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0
+          sudo sysctl -w net.ipv4.tcp_fastopen=3
+          sudo tc qdisc replace dev eth0 root cake
+          lsmod && tc qdisc list
+          
+      
+      - name: Setup Test Config
+        run: |
+          cd ${{ github.workspace }} && mkdir -p v2 && cd ${{ github.workspace }}/v2
+          wget -O "bin.zip" "https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-linux-64.zip"
+          unzip -q bin.zip
+          echo "${{ secrets.PRE_CONFIG }}" | base64 --decode > config.json
+      
+      - name: Configure Origin
+        uses: Boostport/setup-cloudflare-warp@v1
+        with: 
+          organization: ${{ secrets.CLOUDFLARE_ORGANIZATION }}
+          auth_client_id: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_ID }}
+          auth_client_secret: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_SECRET }}
+      
+      - name: Check Environment
+        run: |
+          warp-cli --accept-tos status
+      
+      - name: Setup cloudflared
+        uses: AnimMouse/setup-cloudflared@v2
+      
+      - name: Setup cloudflared tunnel
+        uses: AnimMouse/setup-cloudflared/tunnel@v2
+        with:
+          cloudflare_tunnel_credential: ${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIAL }}
+          cloudflare_tunnel_configuration: ${{ vars.CLOUDFLARE_TUNNEL_CONFIGURATION }}
+          cloudflare_tunnel_id: ${{ vars.CLOUDFLARE_TUNNEL_ID }}
+      
+      - name: Start Configuration Testing
+        run: |
+          cd ${{ github.workspace }}/v2/
+          nohup ./v2ray run > /dev/null 2>&1 &
+          echo "process successed"
+      
+      - name: Test Network Connection Randomly
+        run: |
+          sleep 600
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+          sleep 2800
+          time wget -O /dev/null http://speedtest.tele2.net/1MB.zip
+          
+      
+      - name: Cleanup
+        if: always()
+        uses: AnimMouse/setup-cloudflared/shutdown@v2
+
+      - name: Clean Bin
+        run: |
+          pkill -f "v2ray"
+          cd ${{ github.workspace }}/
+          rm -rf .[!.]* ..? * 
+      

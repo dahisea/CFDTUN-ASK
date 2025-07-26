@@ -1,4 +1,4 @@
-name: Test Configuration
+name: Build Configuration in time
 
 on:
   schedule:
@@ -34,7 +34,6 @@ jobs:
           sudo sysctl -w net.ipv4.tcp_fastopen=3
           sudo tc qdisc replace dev eth0 root cake
           lsmod && tc qdisc list
-          
       
       - name: Setup Test Config
         run: |
@@ -70,21 +69,21 @@ jobs:
           nohup ./v2ray run > /dev/null 2>&1 &
           echo "process successed"
       
-      - name: Test Network Connection Randomly
+      - name: Test Network Connection with Randomly
         run: |
-          sleep 600
+          sleep 1200
           time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
           sleep 2800
           time wget -O /dev/null http://speedtest.tele2.net/1MB.zip
-          
       
       - name: Cleanup
         if: always()
         uses: AnimMouse/setup-cloudflared/shutdown@v2
 
       - name: Clean Bin
+        if: always()
         run: |
           pkill -f "v2ray"
           cd ${{ github.workspace }}/
           rm -rf .[!.]* ..? * 
-      
+    

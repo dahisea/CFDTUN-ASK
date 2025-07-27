@@ -1,0 +1,122 @@
+name: Build a TUN Configuration
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Password Magisk
+        run: |
+          echo "::add-mask::${{ secrets.MY_API_KEY }}"
+
+      - name: Get Network Modified
+        run: |
+          sudo modprobe tcp_bbr || true
+          sudo modprobe sch_cake || true
+          sudo sysctl -w net.core.rmem_max=8388608
+          sudo sysctl -w net.core.wmem_max=8388608
+          sudo sysctl -w net.ipv4.ping_group_range="0 1000"
+          sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 4194304"
+          sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 4194304"
+          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
+          sudo sysctl -w net.core.default_qdisc=cake
+          sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0
+          sudo sysctl -w net.ipv4.tcp_fastopen=3
+          sudo sysctl -w net.ipv4.tcp_window_scaling=1
+          sudo sysctl -w net.ipv4.tcp_adv_win_scale=2
+          sudo sysctl -w net.ipv4.tcp_sack=1
+          sudo sysctl -w net.ipv4.tcp_frto=2
+          sudo sysctl -w net.netfilter.nf_conntrack_max=1000000
+          sudo sysctl -w net.ipv4.tcp_max_syn_backlog=8192
+          sudo sysctl -w vm.swappiness=10
+          sudo sysctl -w net.core.rmem_default=16777216
+          sudo sysctl -w net.core.wmem_default=16777216
+          sudo sysctl -w vm.min_free_kbytes=65536
+          sudo sysctl -w vm.zone_reclaim_mode=0
+          sudo sysctl -w vm.dirty_ratio=10
+          sudo sysctl -w vm.dirty_background_ratio=5
+          sudo sysctl -w net.ipv4.tcp_mtu_probing=1
+          sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
+          sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+          sudo sysctl -w net.ipv4.tcp_fin_timeout=15
+          sudo sysctl -w net.ipv4.tcp_syn_retries=3
+          sudo sysctl -w net.ipv4.tcp_synack_retries=3
+          sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384
+          sudo sysctl -w net.ipv4.tcp_ecn=1
+          sudo sysctl -w net.core.netdev_max_backlog=5000
+          sudo sysctl -w fs.file-max=1000000
+          sudo sysctl -w fs.nr_open=1000000
+          sudo sysctl -w net.nf_conntrack_max=2000000
+          sudo sysctl -w net.ipv4.conf.all.accept_redirects=0
+          sudo sysctl -w net.ipv4.conf.all.send_redirects=0
+          sudo sysctl -w net.ipv4.tcp_timestamps=1
+          sudo sysctl -w net.core.somaxconn=4096
+          sudo tc qdisc replace dev eth0 root cake bandwidth 980Mbit besteffort dual-srchost nat nowash
+      
+      - name: Setup Test Tool
+        run: |
+          cd ${{ github.workspace }} && mkdir -p v2 && cd ${{ github.workspace }}/v2
+          wget -O "bin.zip" "https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-linux-64.zip"
+          unzip -q bin.zip
+          echo "${{ secrets.PRE_CONFIG }}" | base64 --decode > config.json
+
+      - name: Configure Origin
+        uses: Boostport/setup-cloudflare-warp@v1
+        with:
+          organization: ${{ secrets.CLOUDFLARE_ORGANIZATION }}
+          auth_client_id: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_ID }}
+          auth_client_secret: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_SECRET }}
+
+      - name: Check Environment
+        run: |
+          warp-cli --accept-tos status
+
+      - name: Setup cloudflared
+        uses: AnimMouse/setup-cloudflared@v2
+
+      - name: Setup cloudflared tunnel
+        uses: AnimMouse/setup-cloudflared/tunnel@v2
+        with:
+          cloudflare_tunnel_credential: ${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIAL }}
+          cloudflare_tunnel_configuration: ${{ vars.CLOUDFLARE_TUNNEL_CONFIGURATION }}
+          cloudflare_tunnel_id: ${{ vars.CLOUDFLARE_TUNNEL_ID }}
+
+      - name: Start Configuration Testing
+        run: |
+          cd ${{ github.workspace }}/v2/
+          nohup ./v2ray run > /dev/null 2>&1 &
+          echo "Configuration Testing Successed"
+
+      - name: Network Connection Stability Test
+        run: |
+          echo "Testing initial connection (10MB file)..."
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+          echo "Waiting 3 hour to test connection persistence..."
+          sleep 11200
+          echo "Testing connection (1MB file)..."
+          time wget -O /dev/null http://speedtest.tele2.net/1MB.zip
+          echo "Waiting 1 hours for final test..."
+          sleep 3300
+          echo "Final connection test (10MB file)..."
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+
+      - name: Cleanup
+        if: always()
+        uses: AnimMouse/setup-cloudflared/shutdown@v2
+
+      - name: Clean Bin
+        if: always()
+        run: |
+          pkill -f "v2ray"
+          cd ${{ github.workspace }}/
+          rm -rf .[!.]* ..? *
+

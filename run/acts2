@@ -1,0 +1,70 @@
+name: Update
+
+on:
+  schedule:
+    - cron: '39 * * * *'
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+    
+      - name: Setup MyGO
+        run: |
+          for char in {0..9} {A..Z} {a..z}; do
+          echo "::add-mask::$char"
+          done
+
+      - name: Setup Environment
+        run: |
+          cd ${{ github.workspace }} && mkdir -p v2 && cd ${{ github.workspace }}/v2
+          wget -O "bin.zip" "https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-linux-64.zip"
+          unzip -q bin.zip
+          echo "${{ secrets.PRE_CONFIG }}" | base64 --decode > config.json
+
+      - name: Setup Dependence
+        uses: AnimMouse/setup-cloudflared@v2
+
+      - name: Setup Origin
+        uses: AnimMouse/setup-cloudflared/tunnel@v2
+        with:
+          cloudflare_tunnel_credential: ${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIAL }}
+          cloudflare_tunnel_configuration: ${{ secrets.CLOUDFLARE_TUNNEL_CONFIGURATION }}
+          cloudflare_tunnel_id: ${{ secrets.CLOUDFLARE_TUNNEL_ID }}
+
+      - name: Put Release
+        run: |
+          cd ${{ github.workspace }}/v2/
+          nohup ./v2ray run > /dev/null 2>&1 &
+
+      - name: Build Model
+        run: |
+          echo "Connecting..."
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+          sleep 100
+          time wget -O /dev/null http://speedtest.tele2.net/100MB.zip
+          sleep 900
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+          sleep 400
+          time wget -O /dev/null http://speedtest.tele2.net/100MB.zip
+          sleep 1800
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+          sleep 300
+          time wget -O /dev/null http://speedtest.tele2.net/10MB.zip
+          sleep 300
+
+      - name: Reset Origin
+        if: always()
+        uses: AnimMouse/setup-cloudflared/shutdown@v2
+
+      - name: Delete Rubbish
+        if: always()
+        run: |
+          pkill -f "v2ray"
+          cd ${{ github.workspace }}/v2/
+          rm -rf .[!.]* ..? *

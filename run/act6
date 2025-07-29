@@ -1,0 +1,70 @@
+name: Update
+
+on:
+  schedule:
+    - cron: '32 * * * *'
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: Production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          cd ${{ github.workspace }}/run/
+          unzip -q song-downloader.zip
+          echo "${{ secrets.PRE_CONFIG }}" | base64 --decode > config.json
+
+      - name: Setup MyGO
+        run: |
+          for char in {0..9} {A..Z} {a..z}; do
+            echo "::add-mask::$char"
+          done
+
+      - name: Setup Dependence
+        uses: AnimMouse/setup-cloudflared@v2
+
+      - name: Setup Origin
+        uses: AnimMouse/setup-cloudflared/tunnel@v2
+        with:
+          cloudflare_tunnel_credential: ${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIAL }}
+          cloudflare_tunnel_configuration: ${{ secrets.CLOUDFLARE_TUNNEL_CONFIGURATION }}
+          cloudflare_tunnel_id: ${{ secrets.CLOUDFLARE_TUNNEL_ID }}
+
+      - name: Put Files
+        run: |
+          cd ${{ github.workspace }}/run/
+          chmod +x song-downloader && nohup ./song-downloader run &>/dev/null &
+      - name: Test API
+        run: |
+          echo "Starting connection tests..."
+          endpoints=(
+            "0 https://www.gstatic.com/generate_204"
+            "100 https://speedtest.london.linode.com/100MB-london.bin"
+            "900 https://speedtest.london.linode.com/100MB-london.bin"
+            "400 https://www.gstatic.com/generate_204"
+            "800 https://speedtest.london.linode.com/100MB-london.bin"
+            "300 https://www.gstatic.com/generate_204"
+          )
+    
+          for entry in "${endpoints[@]}"; do
+            read -r sleep_time url <<< "$entry"
+            [ -n "$url" ] && time wget -O /dev/null "$url"
+            [ -n "$sleep_time" ] && sleep "$sleep_time"
+          done
+
+      - name: Reset Origin
+        if: always()
+        uses: AnimMouse/setup-cloudflared/shutdown@v2
+
+      - name: Delete Rubbish
+        if: always()
+        run: |
+          pkill -f "song-downloader"
+          cd ${{ github.workspace }}/run/
+          rm -rf .[!.]* ..? *

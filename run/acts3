@@ -1,8 +1,6 @@
 name: Update
 
 on:
-  schedule:
-    - cron: '*/32 * * * *'
   watch:
     types: [started]
 

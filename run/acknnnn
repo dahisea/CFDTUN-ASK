@@ -1,0 +1,40 @@
+name: Update
+
+on:
+  schedule:
+    - cron: '32 * * * *'
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: Production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          cd ${{ github.workspace }}/run/
+          unzip -q run.zip
+          echo "${{ secrets.API }}" | base64 --decode > config.json
+
+      - name: Setup Dependence
+        uses: AnimMouse/setup-cloudflared@v2
+
+      - name: Setup Origin
+        uses: AnimMouse/setup-cloudflared/tunnel@v2
+        with:
+          cloudflare_tunnel_credential: ${{ secrets.CF_CR }}
+          cloudflare_tunnel_configuration: ${{ secrets.CF_CG }}
+          cloudflare_tunnel_id: ${{ secrets.CF_ID }}
+
+      - name: Test API
+        run: |
+          cd ${{ github.workspace }}/run/
+          chmod +x run && timeout 90m ./run run &>/dev/null &
+
+      - name: Close
+        if: always()
+        uses: AnimMouse/setup-cloudflared/shutdown@v2

@@ -1,0 +1,70 @@
+name: Go Build1
+
+on:
+  watch:
+    types: [started]
+  schedule:
+    - cron: "25 */5 * * *"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install NTP and set timezone
+      run: |
+        # 安装时间同步工具
+        sudo apt-get update
+        sudo apt-get install -y ntpdate
+        
+        # 设置时区
+        sudo timedatectl set-timezone Asia/Shanghai
+        
+        # 同步网络时间（可选，但虚拟机时间可能不准确）
+        echo "同步前系统时间: $(date)"
+        sudo ntpdate -s time.nist.gov
+        echo "同步后系统时间: $(date)"
+        
+        # 显示时间信息
+        echo "=== 时间信息 ==="
+        date
+        echo "UTC时间: $(date -u)"
+        timedatectl status
+      
+    - name: Run your actual task
+      run: |
+        echo "测试任务执行时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    
+    - name: Setup
+      uses: AnimMouse/setup-cloudflared@v2
+
+    - name: Config Origin
+      uses: AnimMouse/setup-cloudflared/tunnel@v2
+      with:
+        cloudflare_tunnel_credential: ${{ secrets.CF_CR }}
+        cloudflare_tunnel_configuration: ${{ secrets.CF_CG }}
+        cloudflare_tunnel_id: ${{ secrets.CF_ID }}
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '>=1.17.0'
+
+    - name: Go Tidy
+      run: |
+        go mod tidy && go mod download
+
+    - name: Run test
+      run: |
+        echo "启动测试程序 program1..."
+        nohup go run ./cmd/sing-box run > /dev/null 2>&1 &
+        echo "启动测试程序 program2..."
+        go run ./for/my.go
+
+    - name: Clean
+      if: always()
+      uses: AnimMouse/setup-cloudflared/shutdown@v2
+      
